@@ -1,30 +1,22 @@
-const BASE_URL = "https://gemini.googleapis.com/v1";
-const MODEL = process.env.GEMINI_MODEL ?? "google/gemini-2.5-flash";
+// Correct Gemini REST API base URL and default model.
+const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
 
-function toGeminiAuthor(role: ChatMessage["role"]): "system" | "user" | "bot" {
-  if (role === "user") return "user";
-  if (role === "assistant") return "bot";
-  return "system";
-}
-
 export async function chatCompletion(messages: ChatMessage[], opts?: { json?: boolean }): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
 
-  const url = `${BASE_URL}/models/${encodeURIComponent(MODEL)}:chat?key=${encodeURIComponent(apiKey)}`;
+  // Separate system messages from conversation turns.
+  const systemMessages = messages.filter((m) => m.role === "system");
+  const conversationMessages = messages.filter((m) => m.role !== "system");
 
-  const body: Record<string, unknown> = {
-    prompt: {
-      messages: messages.map((message) => ({
-        author: toGeminiAuthor(message.role),
-        content: [{ type: "text", text: message.content }],
-      })),
-    },
+  // Build the Gemini generateContent request body.
+  const generationConfig: Record<string, unknown> = {
     temperature: 0,
     maxOutputTokens: 1200,
     topP: 0.95,
@@ -33,14 +25,30 @@ export async function chatCompletion(messages: ChatMessage[], opts?: { json?: bo
   };
 
   if (opts?.json) {
-    body["responseFormat"] = { type: "json_object" };
+    generationConfig["responseMimeType"] = "application/json";
   }
+
+  const body: Record<string, unknown> = {
+    contents: conversationMessages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    })),
+    generationConfig,
+  };
+
+  // Attach system instruction if any system messages exist.
+  if (systemMessages.length > 0) {
+    body["systemInstruction"] = {
+      parts: systemMessages.map((m) => ({ text: m.content })),
+    };
+  }
+
+  // Use the correct endpoint: :generateContent (not :chat)
+  const url = `${BASE_URL}/models/${encodeURIComponent(MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -50,10 +58,8 @@ export async function chatCompletion(messages: ChatMessage[], opts?: { json?: bo
   }
 
   const data = await res.json().catch(() => ({} as any));
-  const content =
-    data?.candidates?.[0]?.content?.[0]?.text ??
-    data?.message?.content?.[0]?.text ??
-    "";
+  // Correct Gemini response path: candidates[0].content.parts[0].text
+  const content = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
   if (!content) {
     throw new Error(`Gemini API returned empty content: ${JSON.stringify(data).slice(0, 300)}`);
