@@ -1,6 +1,5 @@
-// Correct Gemini REST API base URL and default model.
+// Correct Gemini REST API base URL.
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -8,7 +7,12 @@ export interface ChatMessage {
 }
 
 export async function chatCompletion(messages: ChatMessage[], opts?: { json?: boolean }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  // Read env at call-time (not module-load time) so Nitro/SSR has fully
+  // populated process.env before this executes.
+  const MODEL = (process.env.GEMINI_MODEL ?? "gemini-2.5-flash").replace(/^["']|["']$/g, "");
+  // Strip surrounding quotes in case the dotenv parser includes them literally.
+  const rawKey = process.env.GEMINI_API_KEY ?? "";
+  const apiKey = rawKey.replace(/^["']|["']$/g, "");
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
 
   // Separate system messages from conversation turns.
