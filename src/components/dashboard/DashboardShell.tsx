@@ -17,6 +17,7 @@ import {
   FolderKanban,
   AlertTriangle,
   Check,
+  Rss,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useAuthStore, type AppRole } from "@/lib/auth-store";
@@ -35,6 +36,7 @@ interface NavItem {
 const NAV: Record<AppRole, NavItem[]> = {
   freelancer: [
     { to: "/freelancer", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/feed", label: "Feed", icon: Rss },
     { to: "/freelancer/jobs", label: "Jobs", icon: Search },
     { to: "/freelancer/applications", label: "Applications", icon: FileText },
     { to: "/freelancer/portfolio", label: "Portfolio", icon: FolderKanban },
@@ -42,6 +44,7 @@ const NAV: Record<AppRole, NavItem[]> = {
   ],
   client: [
     { to: "/client", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/feed", label: "Feed", icon: Rss },
     { to: "/client/jobs", label: "My jobs", icon: Briefcase },
     { to: "/client/candidates", label: "Candidates", icon: Users },
     { to: "/client/analytics", label: "Analytics", icon: BarChart3 },
