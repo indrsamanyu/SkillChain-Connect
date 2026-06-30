@@ -55,6 +55,7 @@ function ProfilePage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<{ name: string; size: number } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [needsPaste, setNeedsPaste] = useState(false);
 
   useEffect(() => {
     if (!data?.profile) return;
@@ -142,6 +143,7 @@ function ProfilePage() {
       return;
     }
     setUploading(true);
+    setNeedsPaste(false);
     try {
       const path = `${user!.id}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage.from("resumes").upload(path, file, { upsert: true });
@@ -150,15 +152,31 @@ function ProfilePage() {
         { profile_id: data.profile.id, resume_url: path },
         { onConflict: "profile_id" },
       );
-      // Show the file in the UI immediately after upload.
+      // Show the file card immediately.
       setUploadedFile({ name: file.name, size: file.size });
-      // Read text if it's a text/markdown file; otherwise prompt user to paste.
-      if (file.type.startsWith("text/") || file.name.endsWith(".md") || file.name.endsWith(".txt")) {
-        const text = await file.text();
-        setResumeText(text);
-      } else {
-        toast.info("Resume uploaded. Paste the text below for AI analysis.");
+
+      // Attempt to read file content as text for ALL types.
+      // Works perfectly for .txt/.md, gives extractable XML for .docx,
+      // and may yield partial content for some PDFs.
+      try {
+        const raw = await file.text();
+        // Strip obvious binary/XML noise — keep only printable ASCII/Unicode lines.
+        const cleaned = raw
+          .split("\n")
+          .map((l) => l.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim())
+          .filter((l) => l.length > 2)
+          .join("\n");
+        if (cleaned.trim().length >= 50) {
+          setResumeText(cleaned);
+          setNeedsPaste(false);
+        } else {
+          // True binary PDF with no extractable text — ask user to paste.
+          setNeedsPaste(true);
+        }
+      } catch {
+        setNeedsPaste(true);
       }
+
       toast.success("Resume uploaded");
       qc.invalidateQueries({ queryKey: ["freelancer-profile"] });
     } catch (e) {
@@ -306,15 +324,38 @@ function ProfilePage() {
                   </div>
                 )}
                 <div className="mt-4">
-                  <Field label="Or paste your resume text for AI analysis">
-                    <Textarea rows={8} value={resumeText} onChange={(e) => setResumeText(e.target.value)} placeholder="Paste full resume text here…" />
+                  {/* Show paste area only when text extraction failed (e.g. scanned PDF) */}
+                  {needsPaste ? (
+                    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 mb-3">
+                      <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                        ⚠️ Couldn't extract text from this file (scanned or encrypted PDF). Paste your resume text below for AI analysis.
+                      </p>
+                    </div>
+                  ) : null}
+                  <Field label={needsPaste ? "Paste resume text" : resumeText ? "Resume text (auto-extracted)" : "Or paste your resume text for AI analysis"}>
+                    <Textarea
+                      rows={needsPaste ? 10 : 5}
+                      value={resumeText}
+                      onChange={(e) => setResumeText(e.target.value)}
+                      placeholder="Paste full resume text here…"
+                      className={needsPaste ? "border-amber-500/50 focus:border-amber-500" : ""}
+                    />
                   </Field>
                 </div>
-                <div className="mt-3 flex justify-end">
-                  <Button onClick={runAnalysis} disabled={analyzing} className="gap-2">
-                    {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    Analyze with AI
-                  </Button>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  {resumeText.trim().length > 0 && resumeText.trim().length < 50 && (
+                    <p className="text-xs text-muted-foreground">Add more text for better AI results.</p>
+                  )}
+                  <div className="ml-auto">
+                    <Button
+                      onClick={runAnalysis}
+                      disabled={analyzing || resumeText.trim().length < 50}
+                      className="gap-2"
+                    >
+                      {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      {analyzing ? "Analyzing…" : "Analyze with AI"}
+                    </Button>
+                  </div>
                 </div>
 
                 <AnimatePresence>
