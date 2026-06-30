@@ -14,6 +14,7 @@ import { Sparkles, Upload, Loader2, X, FileText, CheckCircle2, AlertCircle } fro
 import { useServerFn } from "@tanstack/react-start";
 import { analyzeResume, type ResumeAnalysis } from "@/lib/freelancer-ai.functions";
 import { motion, AnimatePresence } from "framer-motion";
+import { extractPdfText, isPdf } from "@/lib/pdf-extract";
 
 export const Route = createFileRoute("/_authenticated/freelancer/profile")({
   head: () => ({ meta: [{ title: "Profile · SkillChain" }] }),
@@ -155,25 +156,39 @@ function ProfilePage() {
       // Show the file card immediately.
       setUploadedFile({ name: file.name, size: file.size });
 
-      // Attempt to read file content as text for ALL types.
-      // Works perfectly for .txt/.md, gives extractable XML for .docx,
-      // and may yield partial content for some PDFs.
+      // Extract text based on file type.
       try {
-        const raw = await file.text();
-        // Strip obvious binary/XML noise — keep only printable ASCII/Unicode lines.
-        const cleaned = raw
-          .split("\n")
-          .map((l) => l.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim())
-          .filter((l) => l.length > 2)
-          .join("\n");
-        if (cleaned.trim().length >= 50) {
-          setResumeText(cleaned);
+        let extracted = "";
+
+        if (isPdf(file)) {
+          // Use PDF.js for proper PDF text extraction (lazy-loaded).
+          extracted = await extractPdfText(file);
+        } else if (
+          file.type.startsWith("text/") ||
+          file.name.endsWith(".md") ||
+          file.name.endsWith(".txt")
+        ) {
+          // Plain text / markdown — read directly.
+          extracted = await file.text();
+        } else {
+          // DOCX and other formats: read as text and strip binary noise.
+          const raw = await file.text();
+          extracted = raw
+            .split("\n")
+            .map((l) => l.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim())
+            .filter((l) => l.length > 2)
+            .join("\n");
+        }
+
+        if (extracted.trim().length >= 50) {
+          setResumeText(extracted.trim());
           setNeedsPaste(false);
         } else {
-          // True binary PDF with no extractable text — ask user to paste.
+          // Scanned / image-only PDF — no selectable text layer.
           setNeedsPaste(true);
         }
       } catch {
+        // PDF.js or file read failed.
         setNeedsPaste(true);
       }
 
