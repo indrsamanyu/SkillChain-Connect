@@ -53,11 +53,13 @@ function ProfilePage() {
   const [resumeText, setResumeText] = useState("");
   const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<{ name: string; size: number } | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!data?.profile) return;
     const p = data.profile;
-    const fp = (p.freelancer_profiles ?? {}) as { title?: string | null; hourly_rate?: number | null; experience_years?: number | null; availability?: string | null };
+    const fp = (p.freelancer_profiles ?? {}) as { title?: string | null; hourly_rate?: number | null; experience_years?: number | null; availability?: string | null; resume_url?: string | null };
     setForm({
       full_name: p.full_name ?? "",
       headline: p.headline ?? "",
@@ -69,7 +71,15 @@ function ProfilePage() {
       availability: (fp.availability as "available" | "busy" | "unavailable") ?? "available",
     });
     setSkills((data.skills as Array<{ skills: { name: string } | null }>).map((s) => s.skills?.name ?? "").filter(Boolean));
-  }, [data]);
+    // If there's an existing resume on file, show its filename in the upload area.
+    if (fp.resume_url && !uploadedFile) {
+      const filename = fp.resume_url.split("/").pop() ?? "resume";
+      // Strip the timestamp prefix (e.g. "1234567890-MyResume.pdf" → "MyResume.pdf")
+      const cleanName = filename.replace(/^\d+-/, "");
+      setUploadedFile({ name: cleanName, size: 0 });
+    }
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const save = useMutation({
     mutationFn: async () => {
@@ -131,6 +141,7 @@ function ProfilePage() {
       toast.error("Resume must be under 5 MB");
       return;
     }
+    setUploading(true);
     try {
       const path = `${user!.id}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage.from("resumes").upload(path, file, { upsert: true });
@@ -139,6 +150,8 @@ function ProfilePage() {
         { profile_id: data.profile.id, resume_url: path },
         { onConflict: "profile_id" },
       );
+      // Show the file in the UI immediately after upload.
+      setUploadedFile({ name: file.name, size: file.size });
       // Read text if it's a text/markdown file; otherwise prompt user to paste.
       if (file.type.startsWith("text/") || file.name.endsWith(".md") || file.name.endsWith(".txt")) {
         const text = await file.text();
@@ -150,6 +163,8 @@ function ProfilePage() {
       qc.invalidateQueries({ queryKey: ["freelancer-profile"] });
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -237,19 +252,59 @@ function ProfilePage() {
               </Section>
 
               <Section title="Resume & AI feedback" icon={<Sparkles className="h-4 w-4 text-[var(--indigo)]" />}>
-                <div className="rounded-2xl border border-dashed border-border bg-background/60 p-5">
-                  <label className="flex cursor-pointer flex-col items-center gap-2 text-center">
-                    <Upload className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm font-medium">Upload resume (PDF, DOCX, TXT, MD)</span>
-                    <span className="text-xs text-muted-foreground">Stored privately. Only you can read it.</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.doc,.docx,.txt,.md,text/*"
-                      className="hidden"
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleResumeFile(f); }}
-                    />
-                  </label>
-                </div>
+                {/* Show uploaded file card OR drop zone */}
+                {uploadedFile ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center gap-3 rounded-2xl border border-border/60 bg-background/80 px-4 py-3"
+                  >
+                    <FileText className="h-8 w-8 shrink-0 text-[var(--indigo)]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{uploadedFile.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {uploadedFile.size < 1024 * 1024
+                          ? `${Math.round(uploadedFile.size / 1024)} KB`
+                          : `${(uploadedFile.size / (1024 * 1024)).toFixed(1)} MB`}
+                        {" · "}
+                        <span className="text-green-500 font-medium">Uploaded ✓</span>
+                      </p>
+                    </div>
+                    <label className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+                      Replace
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.txt,.md,text/*"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleResumeFile(f); }}
+                      />
+                    </label>
+                  </motion.div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border bg-background/60 p-5">
+                    <label className="flex cursor-pointer flex-col items-center gap-2 text-center">
+                      {uploading ? (
+                        <>
+                          <Loader2 className="h-5 w-5 animate-spin text-[var(--indigo)]" />
+                          <span className="text-sm font-medium text-[var(--indigo)]">Uploading…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-5 w-5 text-muted-foreground" />
+                          <span className="text-sm font-medium">Upload resume (PDF, DOCX, TXT, MD)</span>
+                          <span className="text-xs text-muted-foreground">Stored privately. Only you can read it.</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.txt,.md,text/*"
+                        className="hidden"
+                        disabled={uploading}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleResumeFile(f); }}
+                      />
+                    </label>
+                  </div>
+                )}
                 <div className="mt-4">
                   <Field label="Or paste your resume text for AI analysis">
                     <Textarea rows={8} value={resumeText} onChange={(e) => setResumeText(e.target.value)} placeholder="Paste full resume text here…" />
