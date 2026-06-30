@@ -132,7 +132,7 @@ function ProfilePage() {
       return;
     }
     try {
-      const path = `${data.profile.id}/${Date.now()}-${file.name}`;
+      const path = `${user!.id}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage.from("resumes").upload(path, file, { upsert: true });
       if (upErr) throw upErr;
       await supabase.from("freelancer_profiles").upsert(
